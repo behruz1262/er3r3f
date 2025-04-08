@@ -1,0 +1,319 @@
+// Mock database
+const db = {
+    weeks: Array.from({ length: 16 }, (_, i) => ({
+        week: i + 1,
+        files: [],
+        progress: Math.floor(Math.random() * 100)
+    })),
+    files: []
+};
+
+// DOM Elements
+const dashboardView = document.getElementById('dashboardView');
+const weekView = document.getElementById('weekView');
+const weekGrid = document.querySelector('.week-grid');
+const fileList = document.getElementById('fileList');
+const backToDashboard = document.getElementById('backToDashboard');
+const currentWeekTitle = document.getElementById('currentWeekTitle');
+const uploadBtn = document.getElementById('uploadBtn');
+const fileInput = document.getElementById('fileInput');
+const addLinkBtn = document.getElementById('addLinkBtn');
+const previewModal = document.getElementById('previewModal');
+const previewContainer = document.getElementById('previewContainer');
+const linkModal = document.getElementById('linkModal');
+const linkForm = document.getElementById('linkForm');
+
+// Current state
+let currentWeek = null;
+
+// Initialize the app
+function init() {
+    renderWeekFolders();
+    setupEventListeners();
+}
+
+// Render all week folders in dashboard
+function renderWeekFolders() {
+    weekGrid.innerHTML = '';
+    
+    db.weeks.forEach(week => {
+        const folder = document.createElement('div');
+        folder.className = 'week-folder';
+        folder.dataset.week = week.week;
+        
+        const fileCount = week.files.length;
+        
+        folder.innerHTML = `
+            <div class="folder-icon">
+                📁
+                ${fileCount > 0 ? `<span class="file-indicator">${fileCount}</span>` : ''}
+            </div>
+            <h3>Week ${week.week}</h3>
+            <div class="progress-bar" style="width: ${week.progress}%"></div>
+        `;
+        
+        weekGrid.appendChild(folder);
+    });
+}
+
+// Render files for a specific week
+function renderFilesForWeek(weekNumber) {
+    const week = db.weeks.find(w => w.week === weekNumber);
+    if (!week) return;
+    
+    currentWeek = weekNumber;
+    currentWeekTitle.textContent = `Week ${weekNumber}`;
+    
+    if (week.files.length === 0) {
+        fileList.innerHTML = '<div class="empty-state">No files yet. Upload or add links to get started.</div>';
+        return;
+    }
+    
+    fileList.innerHTML = '';
+    
+    week.files.forEach(file => {
+        const fileItem = document.createElement('div');
+        fileItem.className = 'file-item';
+        fileItem.dataset.id = file.id;
+        
+        let icon = '📄';
+        if (file.type === 'link') icon = '🔗';
+        else if (file.type.includes('image')) icon = '🖼️';
+        else if (file.type.includes('pdf')) icon = '📕';
+        
+        fileItem.innerHTML = `
+            <div class="file-icon">${icon}</div>
+            <div class="file-name">${file.name}</div>
+            <div class="file-actions">
+                <button class="btn-preview">Preview</button>
+                <button class="btn-more">⋮</button>
+            </div>
+        `;
+        
+        fileList.appendChild(fileItem);
+    });
+}
+
+// Setup event listeners
+function setupEventListeners() {
+    // Week folder click
+    document.querySelectorAll('.week-folder').forEach(folder => {
+        folder.addEventListener('click', () => {
+            const weekNumber = parseInt(folder.dataset.week);
+            showWeekView(weekNumber);
+        });
+    });
+    
+    // Back to dashboard
+    backToDashboard.addEventListener('click', (e) => {
+        e.preventDefault();
+        showDashboardView();
+    });
+    
+    // Upload button
+    uploadBtn.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    // File input change
+    fileInput.addEventListener('change', (e) => {
+        if (currentWeek) {
+            handleFileUpload(e.target.files, currentWeek);
+            fileInput.value = '';
+        }
+    });
+    
+    // Add link button
+    addLinkBtn.addEventListener('click', () => {
+        linkModal.style.display = 'flex';
+    });
+    
+    // Link form submission
+    linkForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = document.getElementById('linkName').value;
+        const url = document.getElementById('linkUrl').value;
+        
+        if (name && url && currentWeek) {
+            addLinkToWeek(currentWeek, name, url);
+            linkForm.reset();
+            linkModal.style.display = 'none';
+        }
+    });
+    
+    // Close modals
+    document.querySelectorAll('.close-modal').forEach(btn => {
+        btn.addEventListener('click', () => {
+            previewModal.style.display = 'none';
+            linkModal.style.display = 'none';
+        });
+    });
+    
+    // Click outside modal to close
+    [previewModal, linkModal].forEach(modal => {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    });
+    
+    // Drag and drop
+    fileList.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        fileList.classList.add('dragover');
+    });
+    
+    ['dragleave', 'dragend'].forEach(type => {
+        fileList.addEventListener(type, () => {
+            fileList.classList.remove('dragover');
+        });
+    });
+    
+    fileList.addEventListener('drop', (e) => {
+        e.preventDefault();
+        fileList.classList.remove('dragover');
+        
+        if (currentWeek && e.dataTransfer.files.length > 0) {
+            handleFileUpload(e.dataTransfer.files, currentWeek);
+        }
+    });
+    
+    // File preview (delegated event)
+    fileList.addEventListener('click', (e) => {
+        if (e.target.classList.contains('btn-preview')) {
+            const fileItem = e.target.closest('.file-item');
+            const fileId = fileItem.dataset.id;
+            const file = db.files.find(f => f.id === fileId);
+            
+            if (file) {
+                showFilePreview(file);
+            }
+        }
+    });
+}
+
+// Show week view
+function showWeekView(weekNumber) {
+    dashboardView.style.display = 'none';
+    weekView.style.display = 'block';
+    renderFilesForWeek(weekNumber);
+}
+
+// Show dashboard view
+function showDashboardView() {
+    dashboardView.style.display = 'block';
+    weekView.style.display = 'none';
+    currentWeek = null;
+    renderWeekFolders();
+}
+
+// Handle file upload
+function handleFileUpload(files, weekNumber) {
+    const week = db.weeks.find(w => w.week === weekNumber);
+    if (!week) return;
+    
+    Array.from(files).forEach(file => {
+        const fileId = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
+        const newFile = {
+            id: fileId,
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            week: weekNumber,
+            uploadDate: new Date(),
+            isLink: false
+        };
+        
+        db.files.push(newFile);
+        week.files.push(fileId);
+        
+        // Simulate progress update
+        week.progress = Math.min(100, week.progress + (100 / (week.files.length + 1)));
+    });
+    
+    renderFilesForWeek(weekNumber);
+    renderWeekFolders();
+}
+
+// Add link to week
+function addLinkToWeek(weekNumber, name, url) {
+    const week = db.weeks.find(w => w.week === weekNumber);
+    if (!week) return;
+    
+    const fileId = `link-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    const newLink = {
+        id: fileId,
+        name: name,
+        type: 'link',
+        url: url,
+        week: weekNumber,
+        uploadDate: new Date(),
+        isLink: true
+    };
+    
+    db.files.push(newLink);
+    week.files.push(fileId);
+    
+    // Simulate progress update
+    week.progress = Math.min(100, week.progress + (100 / (week.files.length + 1)));
+    
+    renderFilesForWeek(weekNumber);
+    renderWeekFolders();
+}
+
+// Show file preview
+function showFilePreview(file) {
+    previewContainer.innerHTML = '';
+    
+    if (file.isLink) {
+        previewContainer.innerHTML = `
+            <div class="link-preview">
+                <h3>${file.name}</h3>
+                <p>External Link: <a href="${file.url}" target="_blank">${file.url}</a></p>
+                <p>Added on ${file.uploadDate.toLocaleDateString()}</p>
+            </div>
+        `;
+    } else {
+        previewContainer.innerHTML = `
+            <div class="file-preview">
+                <h3>${file.name}</h3>
+                <p>Type: ${file.type}</p>
+                <p>Size: ${formatFileSize(file.size)}</p>
+                <p>Uploaded on ${file.uploadDate.toLocaleDateString()}</p>
+                <div class="preview-placeholder">
+                    ${getPreviewPlaceholder(file.type)}
+                </div>
+            </div>
+        `;
+    }
+    
+    previewModal.style.display = 'flex';
+}
+
+// Helper function to format file size
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Helper function to get preview placeholder
+function getPreviewPlaceholder(type) {
+    if (type.includes('image')) {
+        return '<div class="image-preview">[Image Preview]</div>';
+    } else if (type.includes('pdf')) {
+        return '<div class="pdf-preview">[PDF Preview]</div>';
+    } else if (type.includes('text')) {
+        return '<div class="text-preview">[Text Content Preview]</div>';
+    } else {
+        return '<div class="generic-preview">No preview available</div>';
+    }
+}
+
+// Initialize the app
+document.addEventListener('DOMContentLoaded', init);
